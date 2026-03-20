@@ -1,5 +1,7 @@
 package main
 
+import "github.com/wompipomp/starlark-gen/cmd"
+
 func main() {
-	// CLI entry point — will be wired to cobra commands in a later plan.
+	cmd.Execute()
 }
