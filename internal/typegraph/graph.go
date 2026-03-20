@@ -62,6 +62,11 @@ func SortTypesInFile(nodes []*types.TypeNode) ([]*types.TypeNode, error) {
 			if dep.FilePath != filePath {
 				continue
 			}
+			// Skip self-edges: circular ref types reference themselves,
+			// but the resolver already broke the cycle with field(type="dict").
+			if dep.Name == n.Name {
+				continue
+			}
 			// Edge from dependency to consumer: dep must come before n.
 			_ = g.AddEdge(dep.Name, n.Name)
 		}
