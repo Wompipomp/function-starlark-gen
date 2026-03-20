@@ -107,6 +107,27 @@ func (s *resolverState) resolveDefinition(defKey string) *types.TypeNode {
 	// Cache the node pointer early so circular refs can reference it.
 	s.resolved[defKey] = node
 
+	// Check for special types by canonical definition path FIRST.
+	if special := IsSpecialType(defKey); special != types.SpecialNone {
+		node.SpecialType = special
+		// Special types like IntOrString and Quantity are leaf types --
+		// no property recursion needed.
+		sort.Strings(node.Dependencies)
+		delete(s.resolving, defKey)
+		return node
+	}
+
+	// Check for K8s extensions on the schema BEFORE processing properties.
+	if special := CheckExtensions(schema); special != types.SpecialNone {
+		node.SpecialType = special
+		// PreserveUnknown and EmbeddedResource skip property recursion entirely.
+		if special == types.SpecialPreserveUnknown || special == types.SpecialEmbeddedResource {
+			sort.Strings(node.Dependencies)
+			delete(s.resolving, defKey)
+			return node
+		}
+	}
+
 	// Resolve properties, handling allOf, oneOf/anyOf, additionalProperties.
 	s.resolveSchema(node, schema, defKey)
 
@@ -226,6 +247,21 @@ func (s *resolverState) resolveField(name string, proxy *highbase.SchemaProxy, p
 	if proxy.IsReference() {
 		refKey := extractRefKey(proxy.GetReference())
 		if refKey != "" {
+			// Check if the $ref target is a special type -- use SpecialTypeToFieldNode.
+			if special := IsSpecialType(refKey); special != types.SpecialNone {
+				specialField := SpecialTypeToFieldNode(special, name)
+				// Preserve the original description if available.
+				schema := proxy.Schema()
+				if schema != nil && schema.Description != "" {
+					specialField.Description = schema.Description
+				}
+				// Add dependency on the referenced type.
+				if parentNode, ok := s.resolved[parentDefKey]; ok {
+					parentNode.Dependencies = appendUnique(parentNode.Dependencies, refKey)
+				}
+				return specialField
+			}
+
 			field.SchemaRef = refKey
 
 			// Check if it's a circular reference back to the parent.
