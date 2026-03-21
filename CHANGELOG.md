@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/Wompipomp/function-starlark-gen/compare/v0.3.0...v0.3.1) (2026-03-21)
+
+
+### Bug Fixes
+
+* correct upload-artifact SHA pin in release workflow ([dbcca89](https://github.com/Wompipomp/function-starlark-gen/commit/dbcca89fb1b69739fd7ae4323827c07af8f3fb8a))
+
 ## [0.3.0](https://github.com/Wompipomp/function-starlark-gen/compare/v0.2.0...v0.3.0) (2026-03-21)
 
 
