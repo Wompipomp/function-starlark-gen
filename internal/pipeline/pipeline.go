@@ -3,13 +3,15 @@
 //
 // RunK8s is the entry point for Kubernetes swagger.json processing.
 // RunCRD is the entry point for CRD YAML file processing.
-// Both pipelines follow the same fail-fast pattern: Load -> Resolve ->
+// RunProvider is the entry point for Crossplane provider CRD processing.
+// All pipelines follow the same fail-fast pattern: Load -> Resolve ->
 // Organize -> Sort -> ValidateDAG -> Emit -> Write.
 package pipeline
 
 import (
 	"fmt"
 
+	"github.com/wompipomp/starlark-gen/internal/annotator"
 	"github.com/wompipomp/starlark-gen/internal/emitter"
 	"github.com/wompipomp/starlark-gen/internal/loader"
 	"github.com/wompipomp/starlark-gen/internal/organizer"
@@ -207,6 +209,110 @@ func RunCRD(opts CRDOptions) (*CRDResult, error) {
 	}
 
 	return &CRDResult{
+		Files:       result,
+		FileCount:   fileCount,
+		SchemaCount: schemaCount,
+		Warnings:    warnings,
+		OutputDir:   opts.OutputDir,
+	}, nil
+}
+
+// ProviderOptions holds the configuration for a Crossplane provider CRD generation run.
+type ProviderOptions struct {
+	// Paths is the list of CRD YAML file paths (positional args).
+	Paths []string
+
+	// Package is the OCI package prefix for generated load() paths.
+	Package string
+
+	// OutputDir is the directory where generated .star files are written.
+	OutputDir string
+
+	// Verbose enables per-file listing output.
+	Verbose bool
+}
+
+// ProviderResult holds the output of a successful Crossplane provider CRD generation run.
+type ProviderResult struct {
+	// Files is the generated content keyed by file path.
+	Files emitter.EmitResult
+
+	// FileCount is the number of files written to disk.
+	FileCount int
+
+	// SchemaCount is the total number of schema definitions across all files.
+	SchemaCount int
+
+	// Warnings is the combined list of non-fatal warnings from all stages.
+	Warnings []string
+
+	// OutputDir is the directory where files were written.
+	OutputDir string
+}
+
+// RunProvider executes the Crossplane provider CRD generation pipeline:
+// Load -> Resolve -> Annotate -> Group -> Sort -> ValidateDAG -> Emit -> Write.
+//
+// Unlike RunCRD, this pipeline inserts an Annotate stage that applies
+// Crossplane-specific transformations: status subtree removal, forProvider/
+// initProvider lifecycle annotations, and standard Crossplane field descriptions.
+//
+// Each stage's error is wrapped with context for clear diagnostics. On first
+// error, execution stops immediately with no partial output. Warnings from the
+// resolver and annotator stages are collected into a single slice.
+func RunProvider(opts ProviderOptions) (*ProviderResult, error) {
+	// Stage 1: Load CRD YAML files.
+	crds, err := loader.LoadCRDs(opts.Paths)
+	if err != nil {
+		return nil, fmt.Errorf("loading CRDs: %w", err)
+	}
+
+	// Stage 2: Resolve CRDs to TypeNodes.
+	nodes, resolverWarnings := resolver.ResolveCRDs(crds)
+
+	// Initialize warnings with non-nil slice.
+	warnings := make([]string, 0, len(resolverWarnings))
+	warnings = append(warnings, resolverWarnings...)
+
+	// Stage 3: Annotate with Crossplane-specific transformations.
+	nodes, annotatorWarnings := annotator.AnnotateCrossplane(nodes)
+	warnings = append(warnings, annotatorWarnings...)
+
+	// Stage 4: Group nodes by FilePath into FileMap.
+	fileMap := make(organizer.FileMap)
+	for i := range nodes {
+		node := &nodes[i]
+		fileMap[node.FilePath] = append(fileMap[node.FilePath], node)
+	}
+
+	// Stage 5: Sort types within each file (topological order).
+	for fp, types := range fileMap {
+		sorted, err := typegraph.SortTypesInFile(types)
+		if err != nil {
+			return nil, fmt.Errorf("sorting types in %s: %w", fp, err)
+		}
+		fileMap[fp] = sorted
+	}
+
+	// Stage 6: Validate inter-file dependency DAG and get emission order.
+	fileOrder, err := typegraph.ValidateLoadDAG(fileMap)
+	if err != nil {
+		return nil, fmt.Errorf("validating load DAG: %w", err)
+	}
+
+	// Stage 7: Generate Starlark code.
+	result, err := emitter.Emit(fileMap, fileOrder, opts.Package)
+	if err != nil {
+		return nil, fmt.Errorf("emitting starlark: %w", err)
+	}
+
+	// Stage 8: Write files to disk.
+	fileCount, schemaCount, err := emitter.WriteFiles(result, opts.OutputDir)
+	if err != nil {
+		return nil, fmt.Errorf("writing files: %w", err)
+	}
+
+	return &ProviderResult{
 		Files:       result,
 		FileCount:   fileCount,
 		SchemaCount: schemaCount,
