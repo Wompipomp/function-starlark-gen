@@ -210,7 +210,19 @@ func emitField(buf *bytes.Buffer, f types.FieldNode, fileTypes map[string]bool, 
 	doc := buildFieldDoc(f, allNodes)
 	parts = append(parts, fmt.Sprintf("doc=%q", doc))
 
-	fmt.Fprintf(buf, "    %s=field(%s),\n", f.Name, strings.Join(parts, ", "))
+	fmt.Fprintf(buf, "    %s=field(%s),\n", sanitizeFieldName(f.Name), strings.Join(parts, ", "))
+}
+
+// sanitizeFieldName replaces characters that are not valid in Starlark
+// identifiers (hyphens, dots, etc.) with underscores so that the emitted
+// keyword argument is syntactically valid.
+func sanitizeFieldName(name string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
+			return r
+		}
+		return '_'
+	}, name)
 }
 
 // buildFieldDoc constructs the doc string for a field following user decisions:
