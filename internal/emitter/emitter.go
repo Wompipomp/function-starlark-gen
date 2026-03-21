@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/wompipomp/starlark-gen/internal/organizer"
 	"github.com/wompipomp/starlark-gen/internal/types"
@@ -144,7 +145,11 @@ func EmitFile(filePath string, nodes []*types.TypeNode, allNodes map[string]*typ
 }
 
 // emitSchema writes a single schema() definition to the buffer.
+// Enum constants are emitted immediately above the schema() call.
 func emitSchema(buf *bytes.Buffer, n *types.TypeNode, fileTypes map[string]bool, allNodes map[string]*types.TypeNode) {
+	// Emit enum constants above the schema definition.
+	emitEnumConstants(buf, n)
+
 	fmt.Fprintf(buf, "%s = schema(\n", n.Name)
 	fmt.Fprintf(buf, "    %q,\n", n.Name)
 
@@ -183,6 +188,22 @@ func emitField(buf *bytes.Buffer, f types.FieldNode, fileTypes map[string]bool, 
 	if f.Items != "" {
 		itemTypeName := organizer.TypeNameFromKey(f.Items)
 		parts = append(parts, fmt.Sprintf("items=%s", itemTypeName))
+	}
+
+	// Enum values.
+	if len(f.EnumValues) > 0 {
+		quoted := make([]string, len(f.EnumValues))
+		for i, v := range f.EnumValues {
+			quoted[i] = fmt.Sprintf("%q", v)
+		}
+		parts = append(parts, fmt.Sprintf("enum=[%s]", strings.Join(quoted, ", ")))
+	}
+
+	// Default value.
+	if f.Default != nil {
+		if formatted, ok := formatStarlarkDefault(f.Default); ok {
+			parts = append(parts, fmt.Sprintf("default=%s", formatted))
+		}
 	}
 
 	// Build doc string.
@@ -226,5 +247,137 @@ func buildFieldDoc(f types.FieldNode, allNodes map[string]*types.TypeNode) strin
 		doc += ". One of: " + strings.Join(f.EnumValues, ", ")
 	}
 
+	// Append default value indicator.
+	if f.Default != nil {
+		if docDefault, ok := formatDocDefault(f.Default); ok {
+			doc += " (default: " + docDefault + ")"
+		}
+	}
+
 	return doc
+}
+
+// emitEnumConstants writes SCREAMING_SNAKE_CASE named constants for all enum
+// fields in the given TypeNode. Constants are emitted immediately above the
+// schema() definition so they are grouped with their related code.
+func emitEnumConstants(buf *bytes.Buffer, n *types.TypeNode) {
+	for _, f := range n.Fields {
+		if len(f.EnumValues) == 0 {
+			continue
+		}
+		for _, val := range f.EnumValues {
+			name := enumConstantName(n.Name, f.Name, val)
+			fmt.Fprintf(buf, "%s = %q\n", name, val)
+		}
+		buf.WriteString("\n")
+	}
+}
+
+// enumConstantName builds a SCREAMING_SNAKE_CASE constant name from the type
+// name, field name, and enum value. The full path prevents collisions across
+// types. Example: enumConstantName("Certificate", "privateKeyAlgorithm", "RSA")
+// returns "CERTIFICATE_PRIVATE_KEY_ALGORITHM_RSA".
+func enumConstantName(typeName, fieldName, value string) string {
+	return toScreamingSnake(typeName) + "_" +
+		toScreamingSnake(fieldName) + "_" +
+		toScreamingSnake(value)
+}
+
+// toScreamingSnake converts a string to SCREAMING_SNAKE_CASE.
+//
+// Rules:
+//   - Insert '_' before uppercase letters preceded by lowercase: PrivateKey -> PRIVATE_KEY
+//   - Handle transitions from uppercase run to uppercase+lowercase: HTTPSProxy -> HTTPS_PROXY
+//   - Replace non-alphanumeric characters with '_'
+//   - Collapse consecutive underscores
+//   - Strip leading/trailing underscores
+//   - Convert everything to uppercase
+func toScreamingSnake(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	var buf bytes.Buffer
+	runes := []rune(s)
+
+	for i, r := range runes {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			buf.WriteRune('_')
+			continue
+		}
+
+		if unicode.IsUpper(r) && i > 0 {
+			prev := runes[i-1]
+			// Insert '_' before uppercase preceded by lowercase: aB -> a_B
+			if unicode.IsLower(prev) {
+				buf.WriteRune('_')
+			} else if unicode.IsUpper(prev) && i+1 < len(runes) && unicode.IsLower(runes[i+1]) {
+				// Insert '_' at transitions like HTTPSProxy -> HTTPS_Proxy boundary
+				buf.WriteRune('_')
+			}
+		}
+
+		buf.WriteRune(unicode.ToUpper(r))
+	}
+
+	// Collapse consecutive underscores and strip leading/trailing.
+	result := buf.String()
+	for strings.Contains(result, "__") {
+		result = strings.ReplaceAll(result, "__", "_")
+	}
+	result = strings.Trim(result, "_")
+
+	return result
+}
+
+// formatStarlarkDefault converts a Go value to its Starlark literal representation
+// for use in field(default=...). Returns the formatted string and whether the
+// value is a supported primitive type.
+//
+// Supported types: string (quoted), bool (True/False), int (%d), float64 (%g).
+// Unsupported types (map, slice, nil): returns "", false.
+func formatStarlarkDefault(val interface{}) (string, bool) {
+	switch v := val.(type) {
+	case string:
+		return fmt.Sprintf("%q", v), true
+	case bool:
+		if v {
+			return "True", true
+		}
+		return "False", true
+	case int:
+		return fmt.Sprintf("%d", v), true
+	case float64:
+		// If value equals its integer conversion, format as int.
+		if v == float64(int(v)) {
+			return fmt.Sprintf("%d", int(v)), true
+		}
+		return fmt.Sprintf("%g", v), true
+	default:
+		return "", false
+	}
+}
+
+// formatDocDefault converts a Go value to its display representation for use in
+// doc strings: (default: value). Unlike formatStarlarkDefault, string values are
+// NOT quoted in the doc string. Bool values use Starlark True/False.
+func formatDocDefault(val interface{}) (string, bool) {
+	switch v := val.(type) {
+	case string:
+		return v, true
+	case bool:
+		if v {
+			return "True", true
+		}
+		return "False", true
+	case int:
+		return fmt.Sprintf("%d", v), true
+	case float64:
+		if v == float64(int(v)) {
+			return fmt.Sprintf("%d", int(v)), true
+		}
+		return fmt.Sprintf("%g", v), true
+	default:
+		return "", false
+	}
 }

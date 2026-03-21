@@ -101,4 +101,9 @@ type FieldNode struct {
 	// EnumValues holds the allowed enum values from the OpenAPI spec, if any.
 	// Used to generate field(enum=[...]) and document allowed values.
 	EnumValues []string
+
+	// Default holds the default value from the OpenAPI spec, if any.
+	// Only primitive values (string, int, float64, bool) are stored.
+	// Complex defaults (objects, arrays) are discarded with a warning at resolution time.
+	Default interface{}
 }
