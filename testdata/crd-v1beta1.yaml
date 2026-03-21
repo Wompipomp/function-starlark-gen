@@ -1,0 +1,23 @@
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: oldstyles.legacy.example.com
+spec:
+  group: legacy.example.com
+  names:
+    kind: OldStyle
+    plural: oldstyles
+    singular: oldstyle
+  scope: Namespaced
+  version: v1
+  validation:
+    openAPIV3Schema:
+      type: object
+      properties:
+        spec:
+          type: object
+          properties:
+            name:
+              type: string
+            count:
+              type: integer
