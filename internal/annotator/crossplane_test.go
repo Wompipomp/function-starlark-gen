@@ -517,3 +517,178 @@ func TestAnnotateCrossplane_AugmentExistingDescription(t *testing.T) {
 		t.Errorf("deletionPolicy.Description = %q, want %q", dp.Description, wantDP)
 	}
 }
+
+func TestAugmentDescription(t *testing.T) {
+	tests := []struct {
+		name       string
+		annotation string
+		original   string
+		want       string
+	}{
+		{
+			name:       "period annotation empty original",
+			annotation: "Ends with period.",
+			original:   "",
+			want:       "Ends with period.",
+		},
+		{
+			name:       "no period annotation empty original",
+			annotation: "No period",
+			original:   "",
+			want:       "No period",
+		},
+		{
+			name:       "period annotation with original uses space",
+			annotation: "Ends with period.",
+			original:   "Original desc",
+			want:       "Ends with period. Original desc",
+		},
+		{
+			name:       "no period annotation with original uses dot space",
+			annotation: "No period",
+			original:   "Original desc",
+			want:       "No period. Original desc",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := augmentDescription(tc.annotation, tc.original)
+			if got != tc.want {
+				t.Errorf("augmentDescription(%q, %q) = %q, want %q",
+					tc.annotation, tc.original, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAnnotateCrossplane_EmptyInput(t *testing.T) {
+	// nil input
+	result, warnings := AnnotateCrossplane(nil)
+	if len(result) != 0 {
+		t.Errorf("AnnotateCrossplane(nil): expected 0 nodes, got %d", len(result))
+	}
+	if len(warnings) != 0 {
+		t.Errorf("AnnotateCrossplane(nil): expected 0 warnings, got %d: %v", len(warnings), warnings)
+	}
+
+	// empty slice input
+	result, warnings = AnnotateCrossplane([]types.TypeNode{})
+	if len(result) != 0 {
+		t.Errorf("AnnotateCrossplane([]): expected 0 nodes, got %d", len(result))
+	}
+	if len(warnings) != 0 {
+		t.Errorf("AnnotateCrossplane([]): expected 0 warnings, got %d: %v", len(warnings), warnings)
+	}
+}
+
+func TestAnnotateCrossplane_DeepStatusSubtree(t *testing.T) {
+	// Build a 3-level deep status subtree:
+	// Root -> Spec (forProvider) + Status -> AtProvider -> Detail -> NestedDetail
+	nodes := []types.TypeNode{
+		makeTypeNode("Deep", "test.v1.Deep", "", []types.FieldNode{
+			{Name: "spec", SchemaRef: "test.v1.DeepSpec"},
+			{Name: "status", SchemaRef: "test.v1.DeepStatus"},
+		}, []string{"test.v1.DeepSpec", "test.v1.DeepStatus"}),
+
+		makeTypeNode("DeepSpec", "test.v1.DeepSpec", "", []types.FieldNode{
+			{Name: "forProvider", SchemaRef: "test.v1.DeepForProvider"},
+		}, []string{"test.v1.DeepForProvider"}),
+
+		makeTypeNode("DeepForProvider", "test.v1.DeepForProvider", "", []types.FieldNode{
+			{Name: "name", TypeName: "string"},
+		}, nil),
+
+		makeTypeNode("DeepStatus", "test.v1.DeepStatus", "", []types.FieldNode{
+			{Name: "atProvider", SchemaRef: "test.v1.DeepAtProvider"},
+		}, []string{"test.v1.DeepAtProvider"}),
+
+		makeTypeNode("DeepAtProvider", "test.v1.DeepAtProvider", "", []types.FieldNode{
+			{Name: "detail", SchemaRef: "test.v1.DeepDetail"},
+		}, []string{"test.v1.DeepDetail"}),
+
+		makeTypeNode("DeepDetail", "test.v1.DeepDetail", "", []types.FieldNode{
+			{Name: "nested", SchemaRef: "test.v1.DeepNestedDetail"},
+		}, []string{"test.v1.DeepNestedDetail"}),
+
+		makeTypeNode("DeepNestedDetail", "test.v1.DeepNestedDetail", "", []types.FieldNode{
+			{Name: "value", TypeName: "string"},
+		}, nil),
+	}
+
+	result, warnings := AnnotateCrossplane(nodes)
+
+	if len(warnings) != 0 {
+		t.Errorf("expected 0 warnings, got %d: %v", len(warnings), warnings)
+	}
+
+	// All 4 status-rooted TypeNodes should be removed.
+	for _, name := range []string{"DeepStatus", "DeepAtProvider", "DeepDetail", "DeepNestedDetail"} {
+		if findNode(result, name) != nil {
+			t.Errorf("%s should be removed (status subtree)", name)
+		}
+	}
+
+	// Non-status TypeNodes should be preserved.
+	for _, name := range []string{"Deep", "DeepSpec", "DeepForProvider"} {
+		if findNode(result, name) == nil {
+			t.Errorf("%s should be preserved", name)
+		}
+	}
+
+	// Root should not have status field.
+	deep := findNode(result, "Deep")
+	if deep == nil {
+		t.Fatal("Deep not found")
+	}
+	if findField(deep, "status") != nil {
+		t.Error("Deep should not have status field after annotation")
+	}
+}
+
+func TestAnnotateCrossplane_StatusWithoutSchemaRef(t *testing.T) {
+	// Root TypeNode with status field that has no SchemaRef.
+	nodes := []types.TypeNode{
+		makeTypeNode("Widget", "test.v1.Widget", "", []types.FieldNode{
+			{Name: "spec", SchemaRef: "test.v1.WidgetSpec"},
+			{Name: "status", TypeName: "dict"}, // no SchemaRef
+		}, []string{"test.v1.WidgetSpec"}),
+
+		makeTypeNode("WidgetSpec", "test.v1.WidgetSpec", "", []types.FieldNode{
+			{Name: "forProvider", SchemaRef: "test.v1.WidgetForProvider"},
+		}, []string{"test.v1.WidgetForProvider"}),
+
+		makeTypeNode("WidgetForProvider", "test.v1.WidgetForProvider", "Config params", []types.FieldNode{
+			{Name: "region", TypeName: "string"},
+		}, nil),
+	}
+
+	result, warnings := AnnotateCrossplane(nodes)
+
+	if len(warnings) != 0 {
+		t.Errorf("expected 0 warnings, got %d: %v", len(warnings), warnings)
+	}
+
+	// Status field should be removed from root even without SchemaRef.
+	widget := findNode(result, "Widget")
+	if widget == nil {
+		t.Fatal("Widget not found")
+	}
+	if findField(widget, "status") != nil {
+		t.Error("status field should be removed even without SchemaRef")
+	}
+
+	// All 3 TypeNodes should still exist (no TypeNode removal without SchemaRef).
+	if len(result) != 3 {
+		t.Errorf("expected 3 nodes (no TypeNode removal), got %d", len(result))
+	}
+
+	// forProvider should still be annotated.
+	fp := findNode(result, "WidgetForProvider")
+	if fp == nil {
+		t.Fatal("WidgetForProvider not found")
+	}
+	if !strings.HasPrefix(fp.Description, "Reconcilable configuration") {
+		t.Errorf("WidgetForProvider.Description = %q, want Reconcilable prefix", fp.Description)
+	}
+}
