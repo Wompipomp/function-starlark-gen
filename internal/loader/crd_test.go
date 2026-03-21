@@ -1,6 +1,8 @@
 package loader
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -195,5 +197,80 @@ func TestLoadCRDs_NonCRDSkipped(t *testing.T) {
 		if doc.Kind != "CustomResourceDefinition" {
 			t.Errorf("unexpected kind %q in results", doc.Kind)
 		}
+	}
+}
+
+func TestLoadCRDs_EmptyFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	emptyFile := filepath.Join(tmpDir, "empty.yaml")
+	if err := os.WriteFile(emptyFile, []byte(""), 0644); err != nil {
+		t.Fatalf("writing empty file: %v", err)
+	}
+
+	crds, err := LoadCRDs([]string{emptyFile})
+	if err != nil {
+		t.Fatalf("LoadCRDs on empty file should not error, got: %v", err)
+	}
+	if len(crds) != 0 {
+		t.Errorf("expected 0 CRDs from empty file, got %d", len(crds))
+	}
+}
+
+func TestLoadCRDs_InvalidYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	badFile := filepath.Join(tmpDir, "bad.yaml")
+	if err := os.WriteFile(badFile, []byte("{{invalid yaml: ["), 0644); err != nil {
+		t.Fatalf("writing bad file: %v", err)
+	}
+
+	_, err := LoadCRDs([]string{badFile})
+	if err == nil {
+		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func TestLoadCRDs_V1Beta1MissingVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+	crdYAML := `apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: tests.test.io
+spec:
+  group: test.io
+  names:
+    kind: TestNoVer
+    plural: testnover
+    singular: testnover
+  scope: Namespaced
+  validation:
+    openAPIV3Schema:
+      type: object
+      properties:
+        name:
+          type: string
+`
+	crdFile := filepath.Join(tmpDir, "v1beta1-no-version.yaml")
+	if err := os.WriteFile(crdFile, []byte(crdYAML), 0644); err != nil {
+		t.Fatalf("writing CRD file: %v", err)
+	}
+
+	crds, err := LoadCRDs([]string{crdFile})
+	if err != nil {
+		t.Fatalf("LoadCRDs failed: %v", err)
+	}
+	if len(crds) != 1 {
+		t.Fatalf("expected 1 CRD, got %d", len(crds))
+	}
+
+	// v1beta1 with no spec.version should default to "v1".
+	doc := crds[0]
+	if len(doc.Spec.Versions) != 1 {
+		t.Fatalf("expected 1 synthesized version, got %d", len(doc.Spec.Versions))
+	}
+	if doc.Spec.Versions[0].Name != "v1" {
+		t.Errorf("expected default version name \"v1\", got %q", doc.Spec.Versions[0].Name)
+	}
+	if doc.Spec.Versions[0].Schema == nil || doc.Spec.Versions[0].Schema.OpenAPIV3Schema == nil {
+		t.Fatal("expected non-nil schema from spec.validation")
 	}
 }

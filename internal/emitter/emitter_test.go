@@ -1385,6 +1385,54 @@ func TestExistingEmitterTests(t *testing.T) {
 	}
 }
 
+func TestToScreamingSnake_Empty(t *testing.T) {
+	got := toScreamingSnake("")
+	if got != "" {
+		t.Errorf("toScreamingSnake(\"\") = %q, want \"\"", got)
+	}
+}
+
+func TestToScreamingSnake_AllCapsRun(t *testing.T) {
+	got := toScreamingSnake("HTTPSProxy")
+	if got != "HTTPS_PROXY" {
+		t.Errorf("toScreamingSnake(\"HTTPSProxy\") = %q, want \"HTTPS_PROXY\"", got)
+	}
+}
+
+func TestToScreamingSnake_WithNumbers(t *testing.T) {
+	got := toScreamingSnake("v2beta1")
+	if got != "V2BETA1" {
+		t.Errorf("toScreamingSnake(\"v2beta1\") = %q, want \"V2BETA1\"", got)
+	}
+}
+
+func TestToScreamingSnake_NonAlphanumeric(t *testing.T) {
+	got := toScreamingSnake("some-field.name")
+	if got != "SOME_FIELD_NAME" {
+		t.Errorf("toScreamingSnake(\"some-field.name\") = %q, want \"SOME_FIELD_NAME\"", got)
+	}
+}
+
+func TestFormatStarlarkDefault_FloatAsInt(t *testing.T) {
+	got, ok := formatStarlarkDefault(float64(3.0))
+	if !ok {
+		t.Fatal("formatStarlarkDefault(3.0) returned ok=false")
+	}
+	if got != "3" {
+		t.Errorf("formatStarlarkDefault(3.0) = %q, want \"3\"", got)
+	}
+}
+
+func TestFormatDocDefault_FloatWithDecimals(t *testing.T) {
+	got, ok := formatDocDefault(float64(3.14))
+	if !ok {
+		t.Fatal("formatDocDefault(3.14) returned ok=false")
+	}
+	if got != "3.14" {
+		t.Errorf("formatDocDefault(3.14) = %q, want \"3.14\"", got)
+	}
+}
+
 // Verify sorting behavior directly.
 func TestSortedKeys(t *testing.T) {
 	m := map[string][]string{

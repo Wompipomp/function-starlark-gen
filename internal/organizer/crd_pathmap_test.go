@@ -43,3 +43,17 @@ func TestCRDDefinitionKeyToFilePath_DeepGroup(t *testing.T) {
 		t.Errorf("got %q, want %q", fp, "some.deep.group.io/v2beta1.star")
 	}
 }
+
+func TestCRDDefinitionKeyToFilePath_NoVersionSegment(t *testing.T) {
+	_, err := CRDDefinitionKeyToFilePath("no.version.here")
+	if err == nil {
+		t.Fatal("expected error for key with no version segment")
+	}
+}
+
+func TestCRDDefinitionKeyToFilePath_NoGroupBeforeVersion(t *testing.T) {
+	_, err := CRDDefinitionKeyToFilePath("v1.Widget")
+	if err == nil {
+		t.Fatal("expected error for key with no group before version")
+	}
+}

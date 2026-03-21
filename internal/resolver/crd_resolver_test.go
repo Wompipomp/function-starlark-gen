@@ -1,6 +1,7 @@
 package resolver
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/wompipomp/starlark-gen/internal/loader"
@@ -375,6 +376,366 @@ func TestResolveCRDs_ListType(t *testing.T) {
 	// Items should be empty for primitive list items (no schema ref needed).
 	if tagsField.Items != "" {
 		t.Errorf("tags Items = %q, want empty for primitive list items", tagsField.Items)
+	}
+}
+
+func TestResolveCRDs_IntOrString(t *testing.T) {
+	trueVal := true
+	doc := loader.CRDDocument{
+		APIVersion: "apiextensions.k8s.io/v1",
+		Kind:       "CustomResourceDefinition",
+		Spec: loader.CRDSpec{
+			Group: "test.io",
+			Names: loader.CRDNames{Kind: "IntOrStringTest"},
+			Versions: []loader.CRDVersion{
+				{
+					Name:    "v1",
+					Served:  true,
+					Storage: true,
+					Schema: &loader.CRDValidation{
+						OpenAPIV3Schema: &loader.JSONSchemaProps{
+							Type: "object",
+							Properties: map[string]*loader.JSONSchemaProps{
+								"port": {
+									XIntOrString: &trueVal,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	nodes, _ := ResolveCRDs([]loader.CRDDocument{doc})
+
+	node := findNode(nodes, "IntOrStringTest")
+	if node == nil {
+		t.Fatal("IntOrStringTest not found")
+	}
+	portField := findField(node, "port")
+	if portField == nil {
+		t.Fatal("IntOrStringTest.port not found")
+	}
+	if portField.TypeName != "" {
+		t.Errorf("port TypeName = %q, want empty for int-or-string", portField.TypeName)
+	}
+	if portField.Description != "int or string" {
+		t.Errorf("port Description = %q, want %q", portField.Description, "int or string")
+	}
+}
+
+func TestResolveCRDs_EmbeddedResource(t *testing.T) {
+	trueVal := true
+	doc := loader.CRDDocument{
+		APIVersion: "apiextensions.k8s.io/v1",
+		Kind:       "CustomResourceDefinition",
+		Spec: loader.CRDSpec{
+			Group: "test.io",
+			Names: loader.CRDNames{Kind: "EmbedTest"},
+			Versions: []loader.CRDVersion{
+				{
+					Name:    "v1",
+					Served:  true,
+					Storage: true,
+					Schema: &loader.CRDValidation{
+						OpenAPIV3Schema: &loader.JSONSchemaProps{
+							Type: "object",
+							Properties: map[string]*loader.JSONSchemaProps{
+								"resource": {
+									XEmbeddedResource: &trueVal,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	nodes, _ := ResolveCRDs([]loader.CRDDocument{doc})
+
+	node := findNode(nodes, "EmbedTest")
+	if node == nil {
+		t.Fatal("EmbedTest not found")
+	}
+	resField := findField(node, "resource")
+	if resField == nil {
+		t.Fatal("EmbedTest.resource not found")
+	}
+	if resField.TypeName != "dict" {
+		t.Errorf("resource TypeName = %q, want dict", resField.TypeName)
+	}
+}
+
+func TestResolveCRDs_AllOfMerge(t *testing.T) {
+	doc := loader.CRDDocument{
+		APIVersion: "apiextensions.k8s.io/v1",
+		Kind:       "CustomResourceDefinition",
+		Spec: loader.CRDSpec{
+			Group: "test.io",
+			Names: loader.CRDNames{Kind: "AllOfTest"},
+			Versions: []loader.CRDVersion{
+				{
+					Name:    "v1",
+					Served:  true,
+					Storage: true,
+					Schema: &loader.CRDValidation{
+						OpenAPIV3Schema: &loader.JSONSchemaProps{
+							Type: "object",
+							AllOf: []*loader.JSONSchemaProps{
+								{
+									Properties: map[string]*loader.JSONSchemaProps{
+										"name": {Type: "string"},
+									},
+									Required: []string{"name"},
+								},
+								{
+									Properties: map[string]*loader.JSONSchemaProps{
+										"age": {Type: "integer"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	nodes, _ := ResolveCRDs([]loader.CRDDocument{doc})
+
+	node := findNode(nodes, "AllOfTest")
+	if node == nil {
+		t.Fatal("AllOfTest not found")
+	}
+	nameField := findField(node, "name")
+	if nameField == nil {
+		t.Fatal("AllOfTest.name not found (should be merged from allOf[0])")
+	}
+	if !nameField.Required {
+		t.Error("name should be required (from allOf[0].required)")
+	}
+	ageField := findField(node, "age")
+	if ageField == nil {
+		t.Fatal("AllOfTest.age not found (should be merged from allOf[1])")
+	}
+}
+
+func TestResolveCRDs_ArrayOfObjects(t *testing.T) {
+	doc := loader.CRDDocument{
+		APIVersion: "apiextensions.k8s.io/v1",
+		Kind:       "CustomResourceDefinition",
+		Spec: loader.CRDSpec{
+			Group: "test.io",
+			Names: loader.CRDNames{Kind: "ArrayObjTest"},
+			Versions: []loader.CRDVersion{
+				{
+					Name:    "v1",
+					Served:  true,
+					Storage: true,
+					Schema: &loader.CRDValidation{
+						OpenAPIV3Schema: &loader.JSONSchemaProps{
+							Type: "object",
+							Properties: map[string]*loader.JSONSchemaProps{
+								"items": {
+									Type: "array",
+									Items: &loader.JSONSchemaProps{
+										Type: "object",
+										Properties: map[string]*loader.JSONSchemaProps{
+											"key":   {Type: "string"},
+											"value": {Type: "string"},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	nodes, _ := ResolveCRDs([]loader.CRDDocument{doc})
+
+	parent := findNode(nodes, "ArrayObjTest")
+	if parent == nil {
+		t.Fatal("ArrayObjTest not found")
+	}
+	itemsField := findField(parent, "items")
+	if itemsField == nil {
+		t.Fatal("ArrayObjTest.items not found")
+	}
+	if itemsField.TypeName != "list" {
+		t.Errorf("items TypeName = %q, want list", itemsField.TypeName)
+	}
+	if itemsField.Items == "" {
+		t.Error("items Items should be non-empty (referencing sub-type)")
+	}
+
+	// Sub-type should be created.
+	subType := findNode(nodes, "ArrayObjTestItems")
+	if subType == nil {
+		t.Fatal("ArrayObjTestItems sub-type not found")
+	}
+	if findField(subType, "key") == nil {
+		t.Error("ArrayObjTestItems.key not found")
+	}
+	if findField(subType, "value") == nil {
+		t.Error("ArrayObjTestItems.value not found")
+	}
+}
+
+func TestResolveCRDs_SkippedVersion(t *testing.T) {
+	doc := loader.CRDDocument{
+		APIVersion: "apiextensions.k8s.io/v1",
+		Kind:       "CustomResourceDefinition",
+		Spec: loader.CRDSpec{
+			Group: "test.io",
+			Names: loader.CRDNames{Kind: "SkipTest"},
+			Versions: []loader.CRDVersion{
+				{
+					Name:    "v1",
+					Served:  false, // not served
+					Storage: true,
+					Schema: &loader.CRDValidation{
+						OpenAPIV3Schema: &loader.JSONSchemaProps{
+							Type: "object",
+							Properties: map[string]*loader.JSONSchemaProps{
+								"name": {Type: "string"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	nodes, _ := ResolveCRDs([]loader.CRDDocument{doc})
+
+	if len(nodes) != 0 {
+		t.Errorf("expected 0 nodes for unserved version, got %d", len(nodes))
+	}
+}
+
+func TestResolveCRDs_MissingSchemaWarning(t *testing.T) {
+	doc := loader.CRDDocument{
+		APIVersion: "apiextensions.k8s.io/v1",
+		Kind:       "CustomResourceDefinition",
+		Spec: loader.CRDSpec{
+			Group: "test.io",
+			Names: loader.CRDNames{Kind: "NoSchema"},
+			Versions: []loader.CRDVersion{
+				{
+					Name:   "v1",
+					Served: true,
+					Schema: nil, // no schema
+				},
+			},
+		},
+	}
+
+	nodes, warnings := ResolveCRDs([]loader.CRDDocument{doc})
+
+	if len(nodes) != 0 {
+		t.Errorf("expected 0 nodes for missing schema, got %d", len(nodes))
+	}
+	if len(warnings) == 0 {
+		t.Fatal("expected warning for missing schema")
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "no openAPIV3Schema") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected warning mentioning 'no openAPIV3Schema', got: %v", warnings)
+	}
+}
+
+func TestResolveCRDs_ComplexDefaultWarning(t *testing.T) {
+	doc := loader.CRDDocument{
+		APIVersion: "apiextensions.k8s.io/v1",
+		Kind:       "CustomResourceDefinition",
+		Spec: loader.CRDSpec{
+			Group: "test.io",
+			Names: loader.CRDNames{Kind: "ComplexDefault"},
+			Versions: []loader.CRDVersion{
+				{
+					Name:    "v1",
+					Served:  true,
+					Storage: true,
+					Schema: &loader.CRDValidation{
+						OpenAPIV3Schema: &loader.JSONSchemaProps{
+							Type: "object",
+							Properties: map[string]*loader.JSONSchemaProps{
+								"config": {
+									Type:    "string",
+									Default: map[string]interface{}{"key": "val"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	nodes, warnings := ResolveCRDs([]loader.CRDDocument{doc})
+
+	// Should still produce a node.
+	if len(nodes) == 0 {
+		t.Fatal("expected at least 1 node")
+	}
+	// The complex default should be skipped with a warning.
+	if len(warnings) == 0 {
+		t.Fatal("expected warning for complex default")
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "complex default") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected warning mentioning 'complex default', got: %v", warnings)
+	}
+
+	// The field should not have Default set.
+	node := findNode(nodes, "ComplexDefault")
+	if node == nil {
+		t.Fatal("ComplexDefault not found")
+	}
+	configField := findField(node, "config")
+	if configField == nil {
+		t.Fatal("ComplexDefault.config not found")
+	}
+	if configField.Default != nil {
+		t.Error("config Default should be nil for complex defaults")
+	}
+}
+
+func TestMapCRDType(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"string", "string"},
+		{"integer", "int"},
+		{"number", "float"},
+		{"boolean", "bool"},
+		{"object", "dict"},
+		{"array", "list"},
+		{"unknown", ""},
+		{"", ""},
+	}
+
+	for _, tc := range tests {
+		got := mapCRDType(tc.input)
+		if got != tc.want {
+			t.Errorf("mapCRDType(%q) = %q, want %q", tc.input, got, tc.want)
+		}
 	}
 }
 
