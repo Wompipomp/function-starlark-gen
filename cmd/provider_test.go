@@ -24,8 +24,8 @@ func TestProviderCmd_Help(t *testing.T) {
 	}
 
 	output := stdout.String()
-	if !strings.Contains(output, "Crossplane provider CRDs") {
-		t.Errorf("expected help to mention 'Crossplane provider CRDs', got: %q", output)
+	if !strings.Contains(output, "Crossplane provider CRD") {
+		t.Errorf("expected help to mention 'Crossplane provider CRD', got: %q", output)
 	}
 }
 
