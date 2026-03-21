@@ -9,16 +9,6 @@ import (
 	"github.com/wompipomp/starlark-gen/internal/pipeline"
 )
 
-// findCallable finds the first starlark.Callable in globals.
-func findCallable(globals starlark.StringDict) (string, starlark.Callable) {
-	for name, val := range globals {
-		if callable, ok := val.(starlark.Callable); ok {
-			return name, callable
-		}
-	}
-	return "", nil
-}
-
 // makeThread creates a basic starlark.Thread for calling constructors.
 func makeThread() *starlark.Thread {
 	return &starlark.Thread{Name: "test"}

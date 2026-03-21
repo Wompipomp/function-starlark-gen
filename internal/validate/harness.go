@@ -13,6 +13,7 @@ import (
 
 	"github.com/wompipomp/function-starlark/schema"
 	"go.starlark.net/starlark"
+	"go.starlark.net/syntax"
 )
 
 // cacheEntry stores the result of loading a module so that repeated
@@ -72,7 +73,7 @@ func (h *Harness) LoadFile(relPath string) (starlark.StringDict, error) {
 		Load: h.load,
 	}
 
-	return starlark.ExecFile(thread, relPath, content, h.predeclared)
+	return starlark.ExecFileOptions(&syntax.FileOptions{}, thread, relPath, content, h.predeclared)
 }
 
 // load implements the Thread.Load callback.
