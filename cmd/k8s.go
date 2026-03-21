@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/wompipomp/starlark-gen/internal/emitter"
@@ -83,9 +82,4 @@ func printVerboseOutput(cmd *cobra.Command, result *pipeline.K8sResult) {
 		schemaCount := bytes.Count(content, []byte(" = schema("))
 		fmt.Fprintf(cmd.OutOrStdout(), "%s (%d schemas)\n", fp, schemaCount)
 	}
-}
-
-// schemaCountInContent counts the number of schema definitions in generated content.
-func schemaCountInContent(content []byte) int {
-	return strings.Count(string(content), " = schema(")
 }
