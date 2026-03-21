@@ -10,6 +10,7 @@ package typegraph
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/dominikbraun/graph"
 	"github.com/wompipomp/starlark-gen/internal/organizer"
@@ -41,16 +42,17 @@ func SortTypesInFile(nodes []*types.TypeNode) ([]*types.TypeNode, error) {
 	// The file path for this group (all nodes should share the same FilePath).
 	filePath := nodes[0].FilePath
 
-	// Build the directed graph. Edges go from dependency -> consumer
-	// so that topological sort places dependencies first.
-	g := graph.New(graph.StringHash, graph.Directed())
+	// Build the directed graph with cycle prevention. Edges go from
+	// dependency -> consumer so that topological sort places dependencies first.
+	g := graph.New(graph.StringHash, graph.Directed(), graph.PreventCycles())
 
 	// Add all type names as vertices.
 	for _, n := range nodes {
 		_ = g.AddVertex(n.Name)
 	}
 
-	// Add edges for intra-file dependencies.
+	// Add edges for intra-file dependencies. When an edge would create a
+	// cycle, break it by converting the referencing field to field(type="dict").
 	for _, n := range nodes {
 		for _, depKey := range n.Dependencies {
 			dep, exists := byDefKey[depKey]
@@ -68,7 +70,10 @@ func SortTypesInFile(nodes []*types.TypeNode) ([]*types.TypeNode, error) {
 				continue
 			}
 			// Edge from dependency to consumer: dep must come before n.
-			_ = g.AddEdge(dep.Name, n.Name)
+			err := g.AddEdge(dep.Name, n.Name)
+			if err == graph.ErrEdgeCreatesCycle {
+				breakCycleDependency(n, depKey)
+			}
 		}
 	}
 
@@ -87,6 +92,36 @@ func SortTypesInFile(nodes []*types.TypeNode) ([]*types.TypeNode, error) {
 	}
 
 	return result, nil
+}
+
+// breakCycleDependency breaks a circular dependency by converting fields that
+// reference depKey to field(type="dict") and removing the dependency edge.
+// This mirrors how the K8s swagger resolver handles circular $ref chains.
+func breakCycleDependency(node *types.TypeNode, depKey string) {
+	node.IsCircularRef = true
+	for i := range node.Fields {
+		if node.Fields[i].SchemaRef == depKey {
+			shortName := depKey[strings.LastIndex(depKey, ".")+1:]
+			node.Fields[i].SchemaRef = ""
+			node.Fields[i].TypeName = "dict"
+			if node.Fields[i].Description != "" {
+				node.Fields[i].Description = "dict - " + node.Fields[i].Description + " (circular reference to " + shortName + ")"
+			} else {
+				node.Fields[i].Description = "dict - Recursive reference to " + shortName
+			}
+		}
+		if node.Fields[i].Items == depKey {
+			node.Fields[i].Items = ""
+		}
+	}
+	// Remove the dependency from the list.
+	filtered := node.Dependencies[:0]
+	for _, d := range node.Dependencies {
+		if d != depKey {
+			filtered = append(filtered, d)
+		}
+	}
+	node.Dependencies = filtered
 }
 
 // ValidateLoadDAG validates that the inter-file dependency graph is a DAG
