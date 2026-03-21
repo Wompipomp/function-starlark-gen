@@ -1,10 +1,10 @@
 // Package pipeline orchestrates the end-to-end generation pipeline, wiring
-// all five stages (Loader, Resolver, Organizer, TypeGraph, Emitter) together.
+// all stages (Loader, Resolver, Organizer, TypeGraph, Emitter) together.
 //
-// RunK8s is the primary entry point for Kubernetes swagger.json processing.
-// It loads a Swagger 2.0 spec, resolves all definitions, organizes types into
-// files, validates the dependency graph, generates Starlark code, and writes
-// the output files to disk.
+// RunK8s is the entry point for Kubernetes swagger.json processing.
+// RunCRD is the entry point for CRD YAML file processing.
+// Both pipelines follow the same fail-fast pattern: Load -> Resolve ->
+// Organize -> Sort -> ValidateDAG -> Emit -> Write.
 package pipeline
 
 import (
@@ -107,6 +107,106 @@ func RunK8s(opts K8sOptions) (*K8sResult, error) {
 	}
 
 	return &K8sResult{
+		Files:       result,
+		FileCount:   fileCount,
+		SchemaCount: schemaCount,
+		Warnings:    warnings,
+		OutputDir:   opts.OutputDir,
+	}, nil
+}
+
+// CRDOptions holds the configuration for a CRD generation run.
+type CRDOptions struct {
+	// Paths is the list of CRD YAML file paths (positional args).
+	Paths []string
+
+	// Package is the OCI package prefix for generated load() paths.
+	Package string
+
+	// OutputDir is the directory where generated .star files are written.
+	OutputDir string
+
+	// Verbose enables per-file listing output.
+	Verbose bool
+}
+
+// CRDResult holds the output of a successful CRD generation run.
+type CRDResult struct {
+	// Files is the generated content keyed by file path.
+	Files emitter.EmitResult
+
+	// FileCount is the number of files written to disk.
+	FileCount int
+
+	// SchemaCount is the total number of schema definitions across all files.
+	SchemaCount int
+
+	// Warnings is the combined list of non-fatal warnings from all stages.
+	Warnings []string
+
+	// OutputDir is the directory where files were written.
+	OutputDir string
+}
+
+// RunCRD executes the full CRD generation pipeline: Load -> Resolve ->
+// Organize -> Sort -> ValidateDAG -> Emit -> Write.
+//
+// Unlike RunK8s, the CRD pipeline skips the Organizer's DefinitionKeyToFilePath
+// mapping because the CRD resolver pre-sets FilePath on each TypeNode from
+// CRD metadata (group/version.star).
+//
+// Each stage's error is wrapped with context for clear diagnostics. On first
+// error, execution stops immediately with no partial output.
+func RunCRD(opts CRDOptions) (*CRDResult, error) {
+	// Stage 1: Load CRD YAML files.
+	crds, err := loader.LoadCRDs(opts.Paths)
+	if err != nil {
+		return nil, fmt.Errorf("loading CRDs: %w", err)
+	}
+
+	// Stage 2: Resolve CRDs to TypeNodes.
+	nodes, resolverWarnings := resolver.ResolveCRDs(crds)
+
+	// Initialize warnings with non-nil slice.
+	warnings := make([]string, 0, len(resolverWarnings))
+	warnings = append(warnings, resolverWarnings...)
+
+	// Stage 3: Organize into FileMap. CRD TypeNodes already have FilePath
+	// pre-set by the resolver, so we group by FilePath directly.
+	fileMap := make(organizer.FileMap)
+	for i := range nodes {
+		node := &nodes[i]
+		fileMap[node.FilePath] = append(fileMap[node.FilePath], node)
+	}
+
+	// Stage 4: Sort types within each file (topological order).
+	for fp, types := range fileMap {
+		sorted, err := typegraph.SortTypesInFile(types)
+		if err != nil {
+			return nil, fmt.Errorf("sorting types in %s: %w", fp, err)
+		}
+		fileMap[fp] = sorted
+	}
+
+	// Stage 5: Validate inter-file dependency DAG and get emission order.
+	fileOrder, err := typegraph.ValidateLoadDAG(fileMap)
+	if err != nil {
+		return nil, fmt.Errorf("validating load DAG: %w", err)
+	}
+
+	// Stage 6: Generate Starlark code.
+	result, err := emitter.Emit(fileMap, fileOrder, opts.Package)
+	if err != nil {
+		return nil, fmt.Errorf("emitting starlark: %w", err)
+	}
+
+	// Stage 7: Write files to disk.
+	fileCount, schemaCount, err := emitter.WriteFiles(result, opts.OutputDir)
+	if err != nil {
+		return nil, fmt.Errorf("writing files: %w", err)
+	}
+
+	return &CRDResult{
 		Files:       result,
 		FileCount:   fileCount,
 		SchemaCount: schemaCount,
