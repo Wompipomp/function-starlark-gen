@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -33,6 +34,7 @@ required fields immediately instead of failing silently at apply time.`,
 // Execute runs the root command. It exits with code 1 on error.
 func Execute() {
 	if err := newRootCmd().Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }

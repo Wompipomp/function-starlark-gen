@@ -81,31 +81,10 @@ func RunK8s(opts K8sOptions) (*K8sResult, error) {
 	}
 	warnings = append(warnings, orgWarnings...)
 
-	// Stage 4: Sort types within each file (topological order).
-	for fp, types := range fileMap {
-		sorted, err := typegraph.SortTypesInFile(types)
-		if err != nil {
-			return nil, fmt.Errorf("sorting types in %s: %w", fp, err)
-		}
-		fileMap[fp] = sorted
-	}
-
-	// Stage 5: Validate inter-file dependency DAG and get emission order.
-	fileOrder, err := typegraph.ValidateLoadDAG(fileMap)
+	// Stages 4-7: Sort, validate DAG, emit, and write.
+	result, fileCount, schemaCount, err := sortEmitWrite(fileMap, opts.Package, opts.OutputDir)
 	if err != nil {
-		return nil, fmt.Errorf("validating load DAG: %w", err)
-	}
-
-	// Stage 6: Generate Starlark code.
-	result, err := emitter.Emit(fileMap, fileOrder, opts.Package)
-	if err != nil {
-		return nil, fmt.Errorf("emitting starlark: %w", err)
-	}
-
-	// Stage 7: Write files to disk.
-	fileCount, schemaCount, err := emitter.WriteFiles(result, opts.OutputDir)
-	if err != nil {
-		return nil, fmt.Errorf("writing files: %w", err)
+		return nil, err
 	}
 
 	return &K8sResult{
@@ -181,31 +160,10 @@ func RunCRD(opts CRDOptions) (*CRDResult, error) {
 		fileMap[node.FilePath] = append(fileMap[node.FilePath], node)
 	}
 
-	// Stage 4: Sort types within each file (topological order).
-	for fp, types := range fileMap {
-		sorted, err := typegraph.SortTypesInFile(types)
-		if err != nil {
-			return nil, fmt.Errorf("sorting types in %s: %w", fp, err)
-		}
-		fileMap[fp] = sorted
-	}
-
-	// Stage 5: Validate inter-file dependency DAG and get emission order.
-	fileOrder, err := typegraph.ValidateLoadDAG(fileMap)
+	// Stages 4-7: Sort, validate DAG, emit, and write.
+	result, fileCount, schemaCount, err := sortEmitWrite(fileMap, opts.Package, opts.OutputDir)
 	if err != nil {
-		return nil, fmt.Errorf("validating load DAG: %w", err)
-	}
-
-	// Stage 6: Generate Starlark code.
-	result, err := emitter.Emit(fileMap, fileOrder, opts.Package)
-	if err != nil {
-		return nil, fmt.Errorf("emitting starlark: %w", err)
-	}
-
-	// Stage 7: Write files to disk.
-	fileCount, schemaCount, err := emitter.WriteFiles(result, opts.OutputDir)
-	if err != nil {
-		return nil, fmt.Errorf("writing files: %w", err)
+		return nil, err
 	}
 
 	return &CRDResult{
@@ -285,31 +243,10 @@ func RunProvider(opts ProviderOptions) (*ProviderResult, error) {
 		fileMap[node.FilePath] = append(fileMap[node.FilePath], node)
 	}
 
-	// Stage 5: Sort types within each file (topological order).
-	for fp, types := range fileMap {
-		sorted, err := typegraph.SortTypesInFile(types)
-		if err != nil {
-			return nil, fmt.Errorf("sorting types in %s: %w", fp, err)
-		}
-		fileMap[fp] = sorted
-	}
-
-	// Stage 6: Validate inter-file dependency DAG and get emission order.
-	fileOrder, err := typegraph.ValidateLoadDAG(fileMap)
+	// Stages 5-8: Sort, validate DAG, emit, and write.
+	result, fileCount, schemaCount, err := sortEmitWrite(fileMap, opts.Package, opts.OutputDir)
 	if err != nil {
-		return nil, fmt.Errorf("validating load DAG: %w", err)
-	}
-
-	// Stage 7: Generate Starlark code.
-	result, err := emitter.Emit(fileMap, fileOrder, opts.Package)
-	if err != nil {
-		return nil, fmt.Errorf("emitting starlark: %w", err)
-	}
-
-	// Stage 8: Write files to disk.
-	fileCount, schemaCount, err := emitter.WriteFiles(result, opts.OutputDir)
-	if err != nil {
-		return nil, fmt.Errorf("writing files: %w", err)
+		return nil, err
 	}
 
 	return &ProviderResult{
@@ -319,4 +256,38 @@ func RunProvider(opts ProviderOptions) (*ProviderResult, error) {
 		Warnings:    warnings,
 		OutputDir:   opts.OutputDir,
 	}, nil
+}
+
+// sortEmitWrite runs the shared tail stages of all pipelines:
+// sort types within files, validate the inter-file load DAG, generate
+// Starlark code, and write files to disk.
+func sortEmitWrite(fileMap organizer.FileMap, pkg, outputDir string) (emitter.EmitResult, int, int, error) {
+	// Sort types within each file (topological order).
+	for fp, types := range fileMap {
+		sorted, err := typegraph.SortTypesInFile(types)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("sorting types in %s: %w", fp, err)
+		}
+		fileMap[fp] = sorted
+	}
+
+	// Validate inter-file dependency DAG and get emission order.
+	fileOrder, err := typegraph.ValidateLoadDAG(fileMap)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("validating load DAG: %w", err)
+	}
+
+	// Generate Starlark code.
+	result, err := emitter.Emit(fileMap, fileOrder, pkg)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("emitting starlark: %w", err)
+	}
+
+	// Write files to disk.
+	fileCount, schemaCount, err := emitter.WriteFiles(result, outputDir)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("writing files: %w", err)
+	}
+
+	return result, fileCount, schemaCount, nil
 }
