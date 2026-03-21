@@ -1,0 +1,40 @@
+# Synthetic non-standard CRD with no forProvider/initProvider structure
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: things.custom.example.io
+spec:
+  group: custom.example.io
+  names:
+    kind: Thing
+    plural: things
+    singular: thing
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                someField:
+                  type: string
+                config:
+                  type: object
+                  properties:
+                    key:
+                      type: string
+                    value:
+                      type: string
+            status:
+              type: object
+              properties:
+                observedState:
+                  type: object
+                  properties:
+                    ready:
+                      type: boolean
