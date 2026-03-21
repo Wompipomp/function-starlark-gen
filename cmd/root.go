@@ -24,6 +24,7 @@ required fields immediately instead of failing silently at apply time.`,
 	}
 
 	rootCmd.AddCommand(newK8sCmd())
+	rootCmd.AddCommand(newCrdCmd())
 
 	return rootCmd
 }
