@@ -114,6 +114,37 @@ func TestSpecialTypeConstants(t *testing.T) {
 	}
 }
 
+func TestFieldNodeDefault(t *testing.T) {
+	// FieldNode struct has a Default field of type interface{} that can hold different types.
+	tests := []struct {
+		name     string
+		value    interface{}
+		wantNil  bool
+	}{
+		{"string default", "medium", false},
+		{"int default", 3, false},
+		{"float64 default", 1.5, false},
+		{"bool default", true, false},
+		{"nil default", nil, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := FieldNode{
+				Name:     "test",
+				TypeName: "string",
+				Default:  tt.value,
+			}
+			if tt.wantNil && f.Default != nil {
+				t.Errorf("expected nil Default, got %v", f.Default)
+			}
+			if !tt.wantNil && f.Default != tt.value {
+				t.Errorf("expected Default %v, got %v", tt.value, f.Default)
+			}
+		})
+	}
+}
+
 func TestSwaggerMiniIsValidJSON(t *testing.T) {
 	// Test 4: testdata/swagger-mini.json is valid JSON.
 	data, err := os.ReadFile("../../testdata/swagger-mini.json")

@@ -920,6 +920,471 @@ func TestEmitFile_FieldOrderPreserved(t *testing.T) {
 	}
 }
 
+// --- Enum constant and default value tests (Phase 2, Plan 02) ---
+
+func TestEmitEnumConstants_StringValues(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "Widget",
+		DefinitionKey: "example.Widget",
+		FilePath:      "example/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "algorithm", TypeName: "string", Description: "Algorithm", EnumValues: []string{"RSA", "ECDSA", "Ed25519"}},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("example/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	// Should emit SCREAMING_SNAKE_CASE constants above schema
+	if !strings.Contains(content, `WIDGET_ALGORITHM_RSA = "RSA"`) {
+		t.Errorf("expected WIDGET_ALGORITHM_RSA constant, got:\n%s", content)
+	}
+	if !strings.Contains(content, `WIDGET_ALGORITHM_ECDSA = "ECDSA"`) {
+		t.Errorf("expected WIDGET_ALGORITHM_ECDSA constant, got:\n%s", content)
+	}
+	if !strings.Contains(content, `WIDGET_ALGORITHM_ED25519 = "Ed25519"`) {
+		t.Errorf("expected WIDGET_ALGORITHM_ED25519 constant, got:\n%s", content)
+	}
+}
+
+func TestEmitEnumConstants_MultipleFields(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "Config",
+		DefinitionKey: "example.Config",
+		FilePath:      "example/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "mode", TypeName: "string", Description: "Mode", EnumValues: []string{"fast", "slow"}},
+			{Name: "level", TypeName: "string", Description: "Level", EnumValues: []string{"high", "low"}},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("example/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	// Both fields should have constants
+	if !strings.Contains(content, `CONFIG_MODE_FAST = "fast"`) {
+		t.Errorf("expected CONFIG_MODE_FAST constant, got:\n%s", content)
+	}
+	if !strings.Contains(content, `CONFIG_MODE_SLOW = "slow"`) {
+		t.Errorf("expected CONFIG_MODE_SLOW constant, got:\n%s", content)
+	}
+	if !strings.Contains(content, `CONFIG_LEVEL_HIGH = "high"`) {
+		t.Errorf("expected CONFIG_LEVEL_HIGH constant, got:\n%s", content)
+	}
+	if !strings.Contains(content, `CONFIG_LEVEL_LOW = "low"`) {
+		t.Errorf("expected CONFIG_LEVEL_LOW constant, got:\n%s", content)
+	}
+}
+
+func TestEmitEnumConstants_SpecialChars(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "Type",
+		DefinitionKey: "example.Type",
+		FilePath:      "example/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "field", TypeName: "string", Description: "Field", EnumValues: []string{"digital signature"}},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("example/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	// Non-alphanumeric replaced with _, collapsed
+	if !strings.Contains(content, `TYPE_FIELD_DIGITAL_SIGNATURE = "digital signature"`) {
+		t.Errorf("expected TYPE_FIELD_DIGITAL_SIGNATURE constant, got:\n%s", content)
+	}
+}
+
+func TestEmitEnumConstants_BoolValues(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "Config",
+		DefinitionKey: "example.Config",
+		FilePath:      "example/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "enabled", TypeName: "string", Description: "Enabled", EnumValues: []string{"true", "false"}},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("example/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	if !strings.Contains(content, `CONFIG_ENABLED_TRUE = "true"`) {
+		t.Errorf("expected CONFIG_ENABLED_TRUE constant, got:\n%s", content)
+	}
+	if !strings.Contains(content, `CONFIG_ENABLED_FALSE = "false"`) {
+		t.Errorf("expected CONFIG_ENABLED_FALSE constant, got:\n%s", content)
+	}
+}
+
+func TestEmitFieldEnum(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "Widget",
+		DefinitionKey: "example.Widget",
+		FilePath:      "example/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "algorithm", TypeName: "string", Description: "Algorithm", EnumValues: []string{"RSA", "ECDSA", "Ed25519"}},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("example/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	// field() call should include enum=[...]
+	if !strings.Contains(content, `enum=["RSA", "ECDSA", "Ed25519"]`) {
+		t.Errorf("expected enum= argument in field(), got:\n%s", content)
+	}
+}
+
+func TestEmitFieldDefault_String(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "Config",
+		DefinitionKey: "example.Config",
+		FilePath:      "example/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "priority", TypeName: "string", Description: "Priority", Default: "medium"},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("example/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	if !strings.Contains(content, `default="medium"`) {
+		t.Errorf("expected default=\"medium\" in field(), got:\n%s", content)
+	}
+}
+
+func TestEmitFieldDefault_Int(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "Config",
+		DefinitionKey: "example.Config",
+		FilePath:      "example/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "replicas", TypeName: "int", Description: "Number of replicas", Default: 3},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("example/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	if !strings.Contains(content, `default=3`) {
+		t.Errorf("expected default=3 in field(), got:\n%s", content)
+	}
+}
+
+func TestEmitFieldDefault_Float(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "Config",
+		DefinitionKey: "example.Config",
+		FilePath:      "example/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "ratio", TypeName: "float", Description: "Ratio", Default: 1.5},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("example/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	if !strings.Contains(content, `default=1.5`) {
+		t.Errorf("expected default=1.5 in field(), got:\n%s", content)
+	}
+}
+
+func TestEmitFieldDefault_Bool(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "Config",
+		DefinitionKey: "example.Config",
+		FilePath:      "example/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "enabled", TypeName: "bool", Description: "Enabled", Default: true},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("example/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	// Starlark uses True (capital T)
+	if !strings.Contains(content, `default=True`) {
+		t.Errorf("expected default=True in field(), got:\n%s", content)
+	}
+}
+
+func TestEmitFieldDefault_BoolFalse(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "Config",
+		DefinitionKey: "example.Config",
+		FilePath:      "example/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "disabled", TypeName: "bool", Description: "Disabled", Default: false},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("example/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	// Starlark uses False (capital F)
+	if !strings.Contains(content, `default=False`) {
+		t.Errorf("expected default=False in field(), got:\n%s", content)
+	}
+}
+
+func TestEmitFieldDefault_ComplexSkipped(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "Config",
+		DefinitionKey: "example.Config",
+		FilePath:      "example/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "metadata", TypeName: "dict", Description: "Metadata", Default: map[string]interface{}{}},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("example/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	// Complex defaults should NOT emit default= argument
+	if strings.Contains(content, "default=") {
+		t.Errorf("expected no default= for complex type, got:\n%s", content)
+	}
+}
+
+func TestEmitFieldDoc_WithDefault(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "Config",
+		DefinitionKey: "example.Config",
+		FilePath:      "example/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "priority", TypeName: "string", Description: "Priority level", Default: "medium"},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("example/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	// Doc should include (default: medium) with unquoted string value
+	if !strings.Contains(content, `(default: medium)`) {
+		t.Errorf("expected (default: medium) in doc, got:\n%s", content)
+	}
+}
+
+func TestEmitFieldDoc_WithBoolDefault(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "Config",
+		DefinitionKey: "example.Config",
+		FilePath:      "example/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "enabled", TypeName: "bool", Description: "Enabled", Default: true},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("example/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	// Doc should include (default: True) with Starlark capitalization
+	if !strings.Contains(content, `(default: True)`) {
+		t.Errorf("expected (default: True) in doc, got:\n%s", content)
+	}
+}
+
+func TestEmitSchema_EnumConstantsAbove(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "PodSpec",
+		DefinitionKey: "io.k8s.api.core.v1.PodSpec",
+		FilePath:      "core/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "restart_policy", TypeName: "string", Description: "Restart policy", EnumValues: []string{"Always", "OnFailure", "Never"}},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("core/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	// Constants must appear ABOVE the schema() call
+	constIdx := strings.Index(content, `POD_SPEC_RESTART_POLICY_ALWAYS`)
+	schemaIdx := strings.Index(content, `PodSpec = schema(`)
+
+	if constIdx < 0 {
+		t.Fatalf("expected enum constant, got:\n%s", content)
+	}
+	if schemaIdx < 0 {
+		t.Fatalf("expected schema() call, got:\n%s", content)
+	}
+	if constIdx >= schemaIdx {
+		t.Errorf("expected constants above schema(), constIdx=%d >= schemaIdx=%d\n%s", constIdx, schemaIdx, content)
+	}
+}
+
+func TestEmitSchema_NoEnums(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "Simple",
+		DefinitionKey: "example.Simple",
+		FilePath:      "example/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "name", TypeName: "string", Description: "The name"},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("example/v1.star", nodes, allNodes, "test:v1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	// No enum constants -- should start directly with schema()
+	if strings.Contains(content, " = \"") {
+		// Check this isn't a constant assignment (schema assignments use "= schema(")
+		lines := strings.Split(content, "\n")
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.Contains(trimmed, " = \"") && !strings.Contains(trimmed, "= schema(") {
+				t.Errorf("unexpected constant-like assignment in output:\n%s", content)
+			}
+		}
+	}
+}
+
+func TestExistingEmitterTests(t *testing.T) {
+	// This test verifies no regressions by running a representative existing scenario.
+	node := &types.TypeNode{
+		Name:          "DeploymentSpec",
+		DefinitionKey: "io.k8s.api.apps.v1.DeploymentSpec",
+		Description:   "DeploymentSpec is the specification of the desired behavior of the Deployment.",
+		FilePath:      "apps/v1.star",
+		Fields: []types.FieldNode{
+			{Name: "replicas", TypeName: "int", Description: "Number of desired pods"},
+			{Name: "paused", TypeName: "bool", Description: "Indicates that the deployment is paused"},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("apps/v1.star", nodes, allNodes, "schemas-k8s:v1.31")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	// Basic structure checks from existing tests
+	if !strings.Contains(content, `DeploymentSpec = schema(`) {
+		t.Error("expected DeploymentSpec = schema( call")
+	}
+	if !strings.Contains(content, `    "DeploymentSpec",`) {
+		t.Error("expected name as first positional arg")
+	}
+	if !strings.Contains(content, `replicas=field(type="int"`) {
+		t.Errorf("expected replicas field, got:\n%s", content)
+	}
+	if !strings.Contains(content, `paused=field(type="bool"`) {
+		t.Errorf("expected paused field, got:\n%s", content)
+	}
+	// No enum constants should appear
+	if strings.Contains(content, "DEPLOYMENT_SPEC_") {
+		t.Errorf("unexpected enum constants for type without enums:\n%s", content)
+	}
+}
+
 // Verify sorting behavior directly.
 func TestSortedKeys(t *testing.T) {
 	m := map[string][]string{
