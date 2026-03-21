@@ -44,7 +44,7 @@ jobs:
           BINARY="starlark-gen-${{ matrix.goos }}-${{ matrix.goarch }}"
           go build -ldflags="-s -w" -o "${BINARY}" .
           chmod +x "${BINARY}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa4c # v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: starlark-gen-${{ matrix.goos }}-${{ matrix.goarch }}
           path: starlark-gen-${{ matrix.goos }}-${{ matrix.goarch }}
