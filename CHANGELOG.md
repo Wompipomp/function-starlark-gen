@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/Wompipomp/function-starlark-gen/compare/v0.3.1...v0.3.2) (2026-03-21)
+
+
+### Bug Fixes
+
+* handle circular type dependencies in CRD schemas ([4de37b2](https://github.com/Wompipomp/function-starlark-gen/commit/4de37b26ffec8fe6f5c138379abe7961180c563e))
+
 ## [0.3.1](https://github.com/Wompipomp/function-starlark-gen/compare/v0.3.0...v0.3.1) (2026-03-21)
 
 
