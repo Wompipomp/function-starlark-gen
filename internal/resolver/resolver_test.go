@@ -437,3 +437,55 @@ func TestResolveDependenciesSorted(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveDeploymentGVKDefaults: top-level resource types read
+// x-kubernetes-group-version-kind and default apiVersion/kind so callers
+// only need to set metadata/spec.
+func TestResolveDeploymentGVKDefaults(t *testing.T) {
+	model, err := loader.LoadSwagger("../../testdata/swagger-mini.json")
+	if err != nil {
+		t.Fatalf("LoadSwagger failed: %v", err)
+	}
+
+	typeNodes, _ := Resolve(model)
+
+	var dep *types.TypeNode
+	for i := range typeNodes {
+		if typeNodes[i].DefinitionKey == "io.k8s.api.apps.v1.Deployment" {
+			dep = &typeNodes[i]
+			break
+		}
+	}
+	if dep == nil {
+		t.Fatal("Deployment TypeNode not found")
+	}
+
+	fieldDefault := func(name string) interface{} {
+		for _, f := range dep.Fields {
+			if f.Name == name {
+				return f.Default
+			}
+		}
+		return nil
+	}
+
+	if got := fieldDefault("apiVersion"); got != "apps/v1" {
+		t.Errorf("Deployment.apiVersion Default = %v, want %q", got, "apps/v1")
+	}
+	if got := fieldDefault("kind"); got != "Deployment" {
+		t.Errorf("Deployment.kind Default = %v, want %q", got, "Deployment")
+	}
+
+	// Sub-types must NOT pick up defaults.
+	for _, n := range typeNodes {
+		if n.DefinitionKey == "io.k8s.api.apps.v1.Deployment" {
+			continue
+		}
+		for _, f := range n.Fields {
+			if (f.Name == "apiVersion" || f.Name == "kind") && f.Default != nil {
+				t.Errorf("sub-type %s has unexpected default on %s: %v",
+					n.DefinitionKey, f.Name, f.Default)
+			}
+		}
+	}
+}

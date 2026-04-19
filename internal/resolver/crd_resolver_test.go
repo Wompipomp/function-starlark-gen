@@ -789,3 +789,49 @@ func TestResolveCRDs_MapType(t *testing.T) {
 		t.Errorf("labels TypeName = %q, want dict", labelsField.TypeName)
 	}
 }
+
+// TestResolveCRDsTopLevelGVKDefaults: top-level CRD kind types get
+// apiVersion/kind fields prepended with defaults derived from group/version/kind.
+// Sub-types (WidgetSpec, WidgetStatus, WidgetConfig) must not get them.
+func TestResolveCRDsTopLevelGVKDefaults(t *testing.T) {
+	crds := loadTestCRDs(t, crdTestdataPath("crd-basic.yaml"))
+	nodes, _ := ResolveCRDs(crds)
+
+	widget := findNode(nodes, "Widget")
+	if widget == nil {
+		t.Fatal("Widget not found")
+	}
+
+	if len(widget.Fields) < 2 {
+		t.Fatalf("Widget has %d fields, expected at least apiVersion/kind/spec/status", len(widget.Fields))
+	}
+	if widget.Fields[0].Name != "apiVersion" {
+		t.Errorf("Fields[0].Name = %q, want apiVersion", widget.Fields[0].Name)
+	}
+	if widget.Fields[0].Default != "example.com/v1" {
+		t.Errorf("Fields[0].Default = %v, want %q", widget.Fields[0].Default, "example.com/v1")
+	}
+	if widget.Fields[0].TypeName != "string" {
+		t.Errorf("Fields[0].TypeName = %q, want string", widget.Fields[0].TypeName)
+	}
+	if widget.Fields[1].Name != "kind" {
+		t.Errorf("Fields[1].Name = %q, want kind", widget.Fields[1].Name)
+	}
+	if widget.Fields[1].Default != "Widget" {
+		t.Errorf("Fields[1].Default = %v, want %q", widget.Fields[1].Default, "Widget")
+	}
+
+	// Sub-types must not get apiVersion/kind fields.
+	for _, subName := range []string{"WidgetSpec", "WidgetStatus", "WidgetConfig"} {
+		sub := findNode(nodes, subName)
+		if sub == nil {
+			t.Errorf("%s not found", subName)
+			continue
+		}
+		for _, f := range sub.Fields {
+			if f.Name == "apiVersion" || f.Name == "kind" {
+				t.Errorf("sub-type %s unexpectedly has %s field", subName, f.Name)
+			}
+		}
+	}
+}

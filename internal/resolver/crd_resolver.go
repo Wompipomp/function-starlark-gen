@@ -123,6 +123,15 @@ func (s *crdResolverState) walkObject(schema *loader.JSONSchemaProps, typeName s
 		node.Fields = append(node.Fields, field)
 	}
 
+	// Top-level kind types get apiVersion/kind defaulted from CRD metadata
+	// so callers only need to set metadata/spec. Sub-types (e.g. WidgetSpec)
+	// are untouched.
+	if typeName == s.info.Kind {
+		ApplyGVKDefaults(&node,
+			APIVersionString(s.info.Group, s.info.Version),
+			s.info.Kind)
+	}
+
 	// Sort dependencies for determinism.
 	sort.Strings(node.Dependencies)
 

@@ -289,6 +289,129 @@ func TestResolveIntOrStringDefinitionPath(t *testing.T) {
 	}
 }
 
+// buildSchemaWithGVK creates a minimal Schema carrying an
+// x-kubernetes-group-version-kind extension with the given entries.
+func buildSchemaWithGVK(entries ...map[string]string) *highbase.Schema {
+	seq := &yaml.Node{Kind: yaml.SequenceNode}
+	for _, e := range entries {
+		mapping := &yaml.Node{Kind: yaml.MappingNode}
+		for _, key := range []string{"group", "version", "kind"} {
+			if v, ok := e[key]; ok {
+				mapping.Content = append(mapping.Content,
+					&yaml.Node{Kind: yaml.ScalarNode, Value: key},
+					&yaml.Node{Kind: yaml.ScalarNode, Value: v},
+				)
+			}
+		}
+		seq.Content = append(seq.Content, mapping)
+	}
+	ext := orderedmap.New[string, *yaml.Node]()
+	ext.Set("x-kubernetes-group-version-kind", seq)
+	return &highbase.Schema{Extensions: ext}
+}
+
+func TestExtractGVKSingle(t *testing.T) {
+	schema := buildSchemaWithGVK(map[string]string{
+		"group": "apps", "version": "v1", "kind": "Deployment",
+	})
+	g, v, k, ok := ExtractGVK(schema)
+	if !ok {
+		t.Fatal("ExtractGVK returned ok=false, want true")
+	}
+	if g != "apps" || v != "v1" || k != "Deployment" {
+		t.Errorf("ExtractGVK = (%q, %q, %q), want (apps, v1, Deployment)", g, v, k)
+	}
+}
+
+func TestExtractGVKCoreGroupEmpty(t *testing.T) {
+	schema := buildSchemaWithGVK(map[string]string{
+		"group": "", "version": "v1", "kind": "Pod",
+	})
+	g, v, k, ok := ExtractGVK(schema)
+	if !ok {
+		t.Fatal("ExtractGVK returned ok=false for core-group Pod")
+	}
+	if g != "" || v != "v1" || k != "Pod" {
+		t.Errorf("ExtractGVK = (%q, %q, %q), want ('', v1, Pod)", g, v, k)
+	}
+}
+
+func TestExtractGVKMultipleReturnsFalse(t *testing.T) {
+	// Multi-entry GVK (DeleteOptions, WatchEvent) must be skipped.
+	schema := buildSchemaWithGVK(
+		map[string]string{"group": "", "version": "v1", "kind": "DeleteOptions"},
+		map[string]string{"group": "apps", "version": "v1", "kind": "DeleteOptions"},
+	)
+	if _, _, _, ok := ExtractGVK(schema); ok {
+		t.Error("ExtractGVK returned ok=true for multi-entry GVK, want false")
+	}
+}
+
+func TestExtractGVKAbsent(t *testing.T) {
+	// No extensions at all.
+	if _, _, _, ok := ExtractGVK(&highbase.Schema{}); ok {
+		t.Error("ExtractGVK returned ok=true when extensions absent, want false")
+	}
+	// Nil schema.
+	if _, _, _, ok := ExtractGVK(nil); ok {
+		t.Error("ExtractGVK returned ok=true for nil schema, want false")
+	}
+}
+
+func TestAPIVersionStringCore(t *testing.T) {
+	if got := APIVersionString("", "v1"); got != "v1" {
+		t.Errorf("APIVersionString(\"\", \"v1\") = %q, want %q", got, "v1")
+	}
+	if got := APIVersionString("apps", "v1"); got != "apps/v1" {
+		t.Errorf("APIVersionString(\"apps\", \"v1\") = %q, want %q", got, "apps/v1")
+	}
+}
+
+func TestApplyGVKDefaultsOverwrite(t *testing.T) {
+	// Field already present -- should be overwritten with a default.
+	node := &types.TypeNode{Fields: []types.FieldNode{
+		{Name: "apiVersion", TypeName: "string", Required: true},
+		{Name: "kind", TypeName: "string"},
+		{Name: "spec", SchemaRef: "x.DeploymentSpec"},
+	}}
+	ApplyGVKDefaults(node, "apps/v1", "Deployment")
+
+	if node.Fields[0].Name != "apiVersion" || node.Fields[0].Default != "apps/v1" {
+		t.Errorf("apiVersion field = %+v", node.Fields[0])
+	}
+	if node.Fields[0].Required {
+		t.Error("apiVersion should be cleared of required=true when defaulted")
+	}
+	if node.Fields[1].Name != "kind" || node.Fields[1].Default != "Deployment" {
+		t.Errorf("kind field = %+v", node.Fields[1])
+	}
+	// spec preserved.
+	if len(node.Fields) != 3 || node.Fields[2].Name != "spec" {
+		t.Errorf("spec field lost or reordered: %+v", node.Fields)
+	}
+}
+
+func TestApplyGVKDefaultsInject(t *testing.T) {
+	// Fields absent -- should be prepended.
+	node := &types.TypeNode{Fields: []types.FieldNode{
+		{Name: "spec", SchemaRef: "x.WidgetSpec"},
+	}}
+	ApplyGVKDefaults(node, "example.com/v1", "Widget")
+
+	if len(node.Fields) != 3 {
+		t.Fatalf("expected 3 fields, got %d: %+v", len(node.Fields), node.Fields)
+	}
+	if node.Fields[0].Name != "apiVersion" || node.Fields[0].Default != "example.com/v1" {
+		t.Errorf("Fields[0] = %+v", node.Fields[0])
+	}
+	if node.Fields[1].Name != "kind" || node.Fields[1].Default != "Widget" {
+		t.Errorf("Fields[1] = %+v", node.Fields[1])
+	}
+	if node.Fields[2].Name != "spec" {
+		t.Errorf("Fields[2] = %+v, want spec", node.Fields[2])
+	}
+}
+
 // Test: SpecialTypeToFieldNode produces correct field nodes for each special type
 func TestSpecialTypeToFieldNode(t *testing.T) {
 	tests := []struct {

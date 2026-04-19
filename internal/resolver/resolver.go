@@ -131,6 +131,12 @@ func (s *resolverState) resolveDefinition(defKey string) *types.TypeNode {
 	// Resolve properties, handling allOf, oneOf/anyOf, additionalProperties.
 	s.resolveSchema(node, schema, defKey)
 
+	// Top-level resource types get apiVersion/kind defaulted from
+	// x-kubernetes-group-version-kind so callers only need to set metadata/spec.
+	if group, version, kind, ok := ExtractGVK(schema); ok {
+		ApplyGVKDefaults(node, APIVersionString(group, version), kind)
+	}
+
 	// Sort dependencies for determinism.
 	sort.Strings(node.Dependencies)
 

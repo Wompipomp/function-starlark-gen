@@ -76,19 +76,21 @@ Deployment = schema(
 Use them in function-starlark compositions:
 
 ```starlark
-load("schemas-k8s:v1.31/apps/v1.star", "Deployment")
+load("schemas-k8s:v1.31/apps/v1.star", "Deployment", "DeploymentSpec")
+load("schemas-k8s:v1.31/meta/v1.star", "ObjectMeta", "LabelSelector")
 
 def compose(req):
-    deployment = Deployment(
+    Resource("my-app", Deployment(
         metadata=ObjectMeta(name="my-app"),
         spec=DeploymentSpec(
             replicas=3,
             selector=LabelSelector(matchLabels={"app": "my-app"}),
         ),
-    )
-    return [Resource(body=deployment, apiVersion="apps/v1", kind="Deployment")]
+    ))
 ```
 
+`apiVersion` and `kind` are defaulted on each top-level resource schema, so
+you don't need to pass them — `Deployment(...)` is already `apps/v1 Deployment`.
 Typos, wrong types, and missing required fields are caught at construction time.
 
 ## Flags
