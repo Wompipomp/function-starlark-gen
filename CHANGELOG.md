@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/Wompipomp/function-starlark-gen/compare/v0.3.2...v0.4.0) (2026-04-19)
+
+
+### Features
+
+* default apiVersion/kind on top-level resource schemas ([b6fc15b](https://github.com/Wompipomp/function-starlark-gen/commit/b6fc15b8784272d3105ccf16f163dd054c98f3ee))
+
 ## [0.3.2](https://github.com/Wompipomp/function-starlark-gen/compare/v0.3.1...v0.3.2) (2026-03-21)
 
 
