@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/Wompipomp/function-starlark-gen/compare/v0.4.0...v0.4.1) (2026-04-20)
+
+
+### Bug Fixes
+
+* omit enum kwarg for list fields to prevent invalid schema validation ([5b40f08](https://github.com/Wompipomp/function-starlark-gen/commit/5b40f081c235e671941cec67656cb4c588be10ec))
+
 ## [0.4.0](https://github.com/Wompipomp/function-starlark-gen/compare/v0.3.2...v0.4.0) (2026-04-19)
 
 
