@@ -287,6 +287,46 @@ func TestEmitFile_RequiredFieldIncludesMarkerInDoc(t *testing.T) {
 	}
 }
 
+func TestEmitFile_ListFieldOmitsEnumKwarg(t *testing.T) {
+	node := &types.TypeNode{
+		Name:          "EntrySpec",
+		DefinitionKey: "com.eon.atlantis.leanix.v1alpha1.EntrySpec",
+		FilePath:      "leanix.atlantis.eon.com/v1alpha1.star",
+		Fields: []types.FieldNode{
+			{
+				Name:        "managementPolicies",
+				TypeName:    "list",
+				Description: "Management policies",
+				EnumValues:  []string{"Observe", "Create", "Update", "Delete", "LateInitialize", "*"},
+			},
+		},
+	}
+
+	nodes := []*types.TypeNode{node}
+	allNodes := buildAllNodes(node)
+
+	out, err := EmitFile("leanix.atlantis.eon.com/v1alpha1.star", nodes, allNodes, "schemas-provider-leanix:v1alpha1")
+	if err != nil {
+		t.Fatalf("EmitFile error: %v", err)
+	}
+
+	content := string(out)
+
+	if strings.Contains(content, "enum=[") {
+		t.Errorf("list field must not emit enum kwarg (enum applies to whole value in function-starlark), got:\n%s", content)
+	}
+
+	// Docstring should still advertise the allowed item values.
+	if !strings.Contains(content, "One of: Observe, Create, Update, Delete, LateInitialize, *") {
+		t.Errorf("expected item enum values in docstring, got:\n%s", content)
+	}
+
+	// Field should still be emitted as a list.
+	if !strings.Contains(content, `managementPolicies=field(type="list"`) {
+		t.Errorf("expected managementPolicies field with type=\"list\", got:\n%s", content)
+	}
+}
+
 func TestEmitFile_EnumValuesListedInDoc(t *testing.T) {
 	node := &types.TypeNode{
 		Name:          "PodSpec",

@@ -190,8 +190,11 @@ func emitField(buf *bytes.Buffer, f types.FieldNode, fileTypes map[string]bool, 
 		parts = append(parts, fmt.Sprintf("items=%s", itemTypeName))
 	}
 
-	// Enum values.
-	if len(f.EnumValues) > 0 {
+	// Enum values. Skipped for list types: function-starlark's `enum` applies
+	// to the whole value, not elements, so emitting it on a list would reject
+	// every non-empty list. Item-level enums are enforced by the API server;
+	// the values still surface in the docstring and as named constants.
+	if len(f.EnumValues) > 0 && f.TypeName != "list" {
 		quoted := make([]string, len(f.EnumValues))
 		for i, v := range f.EnumValues {
 			quoted[i] = fmt.Sprintf("%q", v)
